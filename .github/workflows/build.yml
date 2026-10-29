@@ -1,0 +1,54 @@
+name: Build desktop packages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            artifact: windows-x64
+          - runner: macos-15
+            artifact: macos-arm64
+          - runner: macos-15-intel
+            artifact: macos-x64
+          - runner: ubuntu-22.04
+            artifact: linux-x64
+          - runner: ubuntu-22.04-arm
+            artifact: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Linux Tk
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Run offline tests
+        run: python -m unittest discover -s tests -v
+      - name: Build package
+        run: python tools/build_package.py
+      - name: Check packaged executable
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            dist/ClaptrapDesktopController.app/Contents/MacOS/ClaptrapDesktopController --help
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            dist/ClaptrapDesktopController/ClaptrapDesktopController.exe --help
+          else
+            dist/ClaptrapDesktopController/ClaptrapDesktopController --help
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClaptrapDesktopController-${{ matrix.artifact }}
+          path: dist/packages/ClaptrapDesktopController-${{ matrix.artifact }}.*
+          if-no-files-found: error
