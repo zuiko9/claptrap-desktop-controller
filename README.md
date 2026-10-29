@@ -30,7 +30,7 @@ Contributor setup and packaged build instructions are in [docs/development.md](d
 
 ## Support
 
-[![Support me on Ko-fi](https://storage.ko-fi.com/cdn/brandasset/v2/support_me_on_kofi_blue.png)](https://ko-fi.com/zuiko9)
+<a href="https://ko-fi.com/zuiko9"><img src="https://storage.ko-fi.com/cdn/brandasset/v2/support_me_on_kofi_blue.png" alt="Support me on Ko-fi" width="220"></a>
 
 ## License
 
