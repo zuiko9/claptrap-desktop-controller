@@ -47,6 +47,10 @@ class App:
         self.release_jobs = {}
         self.frame_stamp = 0
         self.photo = None
+        self.video_image_item = None
+        self.video_message_item = None
+        self.video_pause_item = None
+        self.camera_paused = False
         self.last_tick = time.monotonic()
         self.fullscreen = False
         settings = load_settings()
@@ -242,6 +246,7 @@ class App:
         self.client.start()
         self.camera = Camera(host)
         self.camera.start()
+        self.render_video()
         self.address.configure(state='disabled')
         self.connect_button.configure(text='Disconnect')
         self.root.focus_set()
@@ -259,20 +264,32 @@ class App:
         self.telemetry.set('Battery —    Wi-Fi —')
         self.status.set('Disconnected')
         self.frame_stamp = 0
+        self.camera_paused = False
         self.render_video()
 
     def render_video(self):
         width, height = self.video.winfo_width(), self.video.winfo_height()
         if width < 10 or height < 10:
             return
-        self.video.delete('all')
         if self.camera and self.camera.frame is not None and self.draw_camera_frame(width, height):
+            if self.video_message_item is not None:
+                self.video.itemconfigure(self.video_message_item, state='hidden')
             return
 
+        if self.video_image_item is not None:
+            self.video.itemconfigure(self.video_image_item, state='hidden')
+        if self.video_pause_item is not None:
+            self.video.itemconfigure(self.video_pause_item, state='hidden')
+        self.photo = None
         message = self.camera.message if self.camera else 'Camera appears here when connected'
-        self.video.create_text(width // 2, height // 2, text=message,
-                               fill='#e3edf2', width=max(100, width - 40),
-                               font=('TkDefaultFont', 14))
+        if self.video_message_item is None:
+            self.video_message_item = self.video.create_text(
+                width // 2, height // 2, text=message, fill='#e3edf2',
+                width=max(100, width - 40), font=('TkDefaultFont', 14))
+        else:
+            self.video.coords(self.video_message_item, width // 2, height // 2)
+            self.video.itemconfigure(self.video_message_item, text=message,
+                                     width=max(100, width - 40), state='normal')
 
     def draw_camera_frame(self, width, height):
         try:
@@ -283,10 +300,23 @@ class App:
         frame = self.camera.frame.copy()
         frame = ImageOps.contain(
             frame, (width, height), method=Image.Resampling.BILINEAR)
-        self.photo = ImageTk.PhotoImage(frame)
-        self.video.create_image(width // 2, height // 2, image=self.photo)
-        if time.monotonic() - self.camera.frame_time > 2:
-            self.video.create_text(width // 2, 28, text='Camera paused', fill='#ffd36a')
+        photo = ImageTk.PhotoImage(frame)
+        if self.video_image_item is None:
+            self.video_image_item = self.video.create_image(
+                width // 2, height // 2, image=photo)
+        else:
+            self.video.coords(self.video_image_item, width // 2, height // 2)
+            self.video.itemconfigure(self.video_image_item, image=photo, state='normal')
+        self.photo = photo
+        if self.camera_paused:
+            if self.video_pause_item is None:
+                self.video_pause_item = self.video.create_text(
+                    width // 2, 28, text='Camera paused', fill='#ffd36a')
+            else:
+                self.video.coords(self.video_pause_item, width // 2, 28)
+                self.video.itemconfigure(self.video_pause_item, state='normal')
+        elif self.video_pause_item is not None:
+            self.video.itemconfigure(self.video_pause_item, state='hidden')
         return True
 
     def tick(self):
@@ -310,8 +340,12 @@ class App:
                 battery, wifi = client.status[2:4]
                 battery_text = f'{battery}%' if battery <= 100 else 'unknown'
                 self.telemetry.set(f'Battery {battery_text}    Wi-Fi {wifi}/6')
-            if self.camera and self.camera.frame_time != self.frame_stamp:
-                self.frame_stamp = self.camera.frame_time
+            camera_paused = bool(self.camera and self.camera.frame_time and
+                                 now - self.camera.frame_time > 2)
+            frame_stamp = self.camera.frame_time if self.camera else 0
+            if frame_stamp != self.frame_stamp or camera_paused != self.camera_paused:
+                self.frame_stamp = frame_stamp
+                self.camera_paused = camera_paused
                 self.render_video()
             if client.thread and not client.thread.is_alive():
                 reason = client.message
