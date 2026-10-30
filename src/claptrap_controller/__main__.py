@@ -51,6 +51,7 @@ class App:
         self.video_message_item = None
         self.video_pause_item = None
         self.camera_paused = False
+        self.camera_message = None
         self.last_tick = time.monotonic()
         self.fullscreen = False
         settings = load_settings()
@@ -271,6 +272,7 @@ class App:
         width, height = self.video.winfo_width(), self.video.winfo_height()
         if width < 10 or height < 10:
             return
+        self.camera_message = self.camera.message if self.camera else None
         if self.camera and self.camera.frame is not None and self.draw_camera_frame(width, height):
             if self.video_message_item is not None:
                 self.video.itemconfigure(self.video_message_item, state='hidden')
@@ -343,7 +345,9 @@ class App:
             camera_paused = bool(self.camera and self.camera.frame_time and
                                  now - self.camera.frame_time > 2)
             frame_stamp = self.camera.frame_time if self.camera else 0
-            if frame_stamp != self.frame_stamp or camera_paused != self.camera_paused:
+            camera_message = self.camera.message if self.camera else None
+            if (frame_stamp != self.frame_stamp or camera_paused != self.camera_paused or
+                    camera_message != self.camera_message):
                 self.frame_stamp = frame_stamp
                 self.camera_paused = camera_paused
                 self.render_video()
