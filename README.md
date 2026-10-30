@@ -14,7 +14,7 @@ From the repository root:
 PYTHONPATH=src python -m claptrap_controller
 ```
 
-The window opens disconnected. Join the robot's Wi-Fi, check the robot address, then select **Connect**. The default address is `192.168.10.123`; change it if your robot uses another address.
+The window opens disconnected. Set the robot's switch to **2 / On** for camera access, or **1 / Run** to enable movement. Join its Wi-Fi (the `CL4P-TP...` network name varies between units), check the robot address, then select **Connect**. The default address is `192.168.10.123`; change it if your robot uses another address. Run mode may shut off if the robot is not upright on a solid surface.
 
 ## Controls
 
