@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import platform
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,15 @@ def build():
         command.extend(['--icon', str(ROOT / 'assets' / 'app-icon.png')])
     command.append(str(ROOT / 'tools' / 'launcher.py'))
     subprocess.run(command, cwd=ROOT, check=True)
+    if PLATFORM == 'macos':
+        app_path = ROOT / 'dist' / f'{NAME}.app'
+        info_path = app_path / 'Contents' / 'Info.plist'
+        with info_path.open('rb') as info_file:
+            info = plistlib.load(info_file)
+        info['NSMicrophoneUsageDescription'] = 'Send microphone audio to the connected robot while Hold to talk is pressed.'
+        with info_path.open('wb') as info_file:
+            plistlib.dump(info, info_file)
+        subprocess.run(['codesign', '--force', '--sign', '-', str(app_path)], check=True)
 
     package_dir = ROOT / 'dist' / 'packages'
     package_dir.mkdir(parents=True, exist_ok=True)

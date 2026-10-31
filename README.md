@@ -4,7 +4,7 @@ Claptrap Desktop Controller is an unofficial desktop app for the CL4P-TP robot i
 
 ## Run
 
-The app needs Python 3 and Tkinter. Camera display also needs Pillow. On Debian or Raspberry Pi OS, install `python3-tk`, `python3-pil`, and `python3-pil.imagetk`.
+The app needs Python 3 and Tkinter. Camera display needs Pillow; microphone talk needs `sounddevice`. Install both with `python -m pip install Pillow sounddevice`. On Debian or Raspberry Pi OS, install `python3-tk`, `python3-pil`, `python3-pil.imagetk`, and `libportaudio2`.
 
 Packaged archives for Windows, macOS, and Linux are produced by the build workflow. Extract the archive for your system, then open the app inside. Linux also needs a graphical desktop and Tk libraries.
 
@@ -23,8 +23,9 @@ The window opens disconnected. Set the robot's switch to **2 / On** for camera a
 - Press **Space** to clear movement. Movement also clears when the window loses focus, status becomes stale, or you disconnect.
 - Set movement strength from 1 to 31. Start low when checking physical direction on a robot.
 - Press **F11** for fullscreen; **Esc** returns to windowed mode.
+- Hold **T** or **Hold to talk** to stream your microphone to the robot; release to stop. Set talk level from 10% to 100% and start at 40% to limit speaker feedback. The desktop may ask for microphone permission.
 
-The camera appears after connection when its stream is available. If Pillow is missing or the stream fails, the video area shows a message. Audio is not available in this build.
+The camera appears after connection when its stream is available. If Pillow is missing or the stream fails, the video area shows a message. The battery percentage is an approximate, smoothed value because the robot's raw status can vary rapidly.
 
 Contributor setup and packaged build instructions are in [docs/development.md](docs/development.md).
 

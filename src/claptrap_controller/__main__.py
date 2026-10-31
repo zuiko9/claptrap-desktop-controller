@@ -9,8 +9,9 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
+from .audio import TalkSender
 from .camera import Camera
-from .control import Movement
+from .control import BatteryEstimate, Movement
 from .transport import ControlClient
 
 CONFIG_DIR = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
@@ -41,6 +42,11 @@ class App:
         self.smoke = smoke
         self.client = None
         self.camera = None
+        self.talk = None
+        self.talk_inputs = set()
+        self.talk_release_job = None
+        self.battery = BatteryEstimate()
+        self.battery_stamp = 0
         self.movement = Movement()
         self.keys_down = set()
         self.pointer_down = set()
@@ -60,8 +66,12 @@ class App:
         if type(strength) is not int or not 1 <= strength <= 31:
             strength = DEFAULT_STRENGTH
         self.strength = tk.IntVar(value=strength)
+        self.talk_level = tk.IntVar(value=40)
+        self.talk_output_percent = 40
+        self.talk_level.trace_add('write', self.update_talk_level)
         self.status = tk.StringVar(value='Disconnected · join the robot Wi-Fi to connect')
         self.telemetry = tk.StringVar(value='Battery —    Wi-Fi —')
+        self.talk_status = tk.StringVar(value='Talk idle')
         self.configure_window()
         self.build_layout()
         self.bind_events()
@@ -119,6 +129,14 @@ class App:
         ttk.Label(panel, text='Movement strength (1–31)').pack(anchor='w')
         ttk.Spinbox(panel, from_=1, to=31, textvariable=self.strength, width=6).pack(anchor='w', pady=6)
         ttk.Separator(panel).pack(fill='x', pady=16)
+        self.talk_button = ttk.Button(panel, text='Hold to talk · T', takefocus=False)
+        self.talk_button.pack(fill='x')
+        self.talk_button.bind('<ButtonPress-1>', self.talk_press)
+        ttk.Label(panel, text='Talk level (%)').pack(anchor='w', pady=(8, 0))
+        ttk.Spinbox(panel, from_=10, to=100, increment=10,
+                    textvariable=self.talk_level, width=6).pack(anchor='w', pady=6)
+        ttk.Label(panel, textvariable=self.talk_status, wraplength=205).pack(anchor='w')
+        ttk.Separator(panel).pack(fill='x', pady=16)
         ttk.Label(panel, textvariable=self.telemetry, wraplength=205).pack(anchor='w')
         ttk.Label(shell, text='Release to stop · focus loss clears input · F11 fullscreen · Esc exits fullscreen',
                   font=('TkDefaultFont', 10)).pack(anchor='w', pady=(12, 0))
@@ -166,8 +184,47 @@ class App:
 
     def stop(self):
         self.clear_input()
+        self.stop_talking()
         if self.client:
             self.client.neutral()
+
+    def talk_strength(self):
+        try:
+            return max(10, min(100, self.talk_level.get()))
+        except (ValueError, tk.TclError):
+            return 40
+
+    def update_talk_level(self, *args):
+        self.talk_output_percent = self.talk_strength()
+
+    def talk_press(self, event=None):
+        source = 'pointer' if event is not None else 'key'
+        if not self.client or not self.client.has_fresh_status() or not self.talk:
+            self.talk_status.set('Connect and wait for robot status to talk')
+            return
+        was_idle = not self.talk_inputs
+        self.talk_inputs.add(source)
+        if was_idle:
+            self.talk.start()
+
+    def release_talk_input(self, source):
+        if source not in self.talk_inputs:
+            return
+        self.talk_inputs.discard(source)
+        if not self.talk_inputs and self.talk:
+            self.talk.stop()
+
+    def release_talk_key(self):
+        self.talk_release_job = None
+        self.release_talk_input('key')
+
+    def stop_talking(self):
+        self.talk_inputs.clear()
+        if self.talk_release_job is not None:
+            self.root.after_cancel(self.talk_release_job)
+            self.talk_release_job = None
+        if self.talk:
+            self.talk.stop()
 
     def check_focus(self):
         if self.root.focus_displayof() is None or self.editing():
@@ -190,6 +247,12 @@ class App:
         if key == 'space' and not self.editing():
             self.stop()
             return 'break'
+        if key == 't' and not self.editing():
+            if self.talk_release_job is not None:
+                self.root.after_cancel(self.talk_release_job)
+                self.talk_release_job = None
+            self.talk_press()
+            return 'break'
         can_move = (self.client and self.client.has_fresh_status() and
                     not self.client.locked)
         if self.editing() or not can_move:
@@ -203,6 +266,11 @@ class App:
 
     def key_release(self, event):
         key = self.key_name(event)
+        if key == 't' and 'key' in self.talk_inputs:
+            if self.talk_release_job is not None:
+                self.root.after_cancel(self.talk_release_job)
+            self.talk_release_job = self.root.after(15, self.release_talk_key)
+            return 'break'
         if key in self.keys_down:
             if key in self.release_jobs:
                 self.root.after_cancel(self.release_jobs.pop(key))
@@ -225,6 +293,7 @@ class App:
             self.update_input()
 
     def pointer_release(self, event):
+        self.release_talk_input('pointer')
         if self.pointer_down:
             self.pointer_down.clear()
             self.update_input()
@@ -247,6 +316,10 @@ class App:
         self.client.start()
         self.camera = Camera(host)
         self.camera.start()
+        self.talk = TalkSender(host, self.client.has_fresh_status,
+                               lambda: self.talk_output_percent)
+        self.battery = BatteryEstimate()
+        self.battery_stamp = 0
         self.render_video()
         self.address.configure(state='disabled')
         self.connect_button.configure(text='Disconnect')
@@ -259,10 +332,14 @@ class App:
             self.client.close()
         if self.camera:
             self.camera.close()
+        if self.talk:
+            self.talk.stop()
         self.client = self.camera = None
+        self.talk = None
         self.address.configure(state='normal')
         self.connect_button.configure(text='Connect')
         self.telemetry.set('Battery —    Wi-Fi —')
+        self.talk_status.set('Talk idle')
         self.status.set('Disconnected')
         self.frame_stamp = 0
         self.camera_paused = False
@@ -279,7 +356,7 @@ class App:
             return
 
         if self.video_image_item is not None:
-            self.video.itemconfigure(self.video_image_item, state='hidden')
+            self.video.itemconfigure(self.video_image_item, image='', state='hidden')
         if self.video_pause_item is not None:
             self.video.itemconfigure(self.video_pause_item, state='hidden')
         self.photo = None
@@ -330,6 +407,7 @@ class App:
             client = self.client
             if client.locked or not client.has_fresh_status():
                 self.clear_input()
+                self.stop_talking()
                 client.neutral()
                 if client.has_fresh_status():
                     client.arm()
@@ -338,10 +416,14 @@ class App:
             if client.connected and not client.has_fresh_status():
                 status = 'Connected · waiting for fresh status · movement paused'
             self.status.set(status)
-            if client.status:
+            if client.status and client.status_time != self.battery_stamp:
+                self.battery_stamp = client.status_time
                 battery, wifi = client.status[2:4]
-                battery_text = f'{battery}%' if battery <= 100 else 'unknown'
+                estimate = self.battery.update(battery)
+                battery_text = f'~{estimate}%' if estimate is not None else 'unknown'
                 self.telemetry.set(f'Battery {battery_text}    Wi-Fi {wifi}/6')
+            if self.talk:
+                self.talk_status.set(self.talk.message)
             camera_paused = bool(self.camera and self.camera.frame_time and
                                  now - self.camera.frame_time > 2)
             frame_stamp = self.camera.frame_time if self.camera else 0
@@ -358,12 +440,17 @@ class App:
         self.root.after(UI_TICK_MS, self.tick)
 
     def close(self):
-        self.save()
-        client = self.client
-        self.disconnect()
-        if client and client.thread:
-            client.thread.join(timeout=0.6)
-        self.root.destroy()
+        try:
+            self.save()
+            client = self.client
+            talk = self.talk
+            self.disconnect()
+            if client and client.thread:
+                client.thread.join(timeout=0.6)
+            if talk and talk.thread:
+                talk.thread.join(timeout=0.2)
+        finally:
+            self.root.destroy()
 
 
 def main():
