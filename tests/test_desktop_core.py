@@ -10,7 +10,7 @@ import types
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from claptrap_controller.camera import FrameParser
+from claptrap_controller.camera import Camera, FrameParser
 from claptrap_controller.audio import PACKET_BYTES, TalkSender, scale_pcm16le
 from claptrap_controller.control import BatteryEstimate, Movement, StatusParser
 from claptrap_controller.transport import ControlClient
@@ -37,6 +37,42 @@ class BatteryEstimateTests(unittest.TestCase):
             displayed = estimate.update(80)
         self.assertEqual(displayed, 80)
         self.assertEqual(estimate.update(255), 80)
+
+
+class CameraStreamTests(unittest.TestCase):
+    def test_decodes_each_arriving_frame_without_a_time_limit(self):
+        camera = Camera('192.168.10.123')
+        frames = [b'\xff\xd8' + bytes([number]) + b'\xff\xd9'
+                  for number in range(3)]
+        decoded = []
+
+        class FakeResponse:
+            status = 200
+
+            def read1(self, size):
+                return frames.pop(0) if frames else b''
+
+        class FakeConnection:
+            def request(self, method, path):
+                pass
+
+            def getresponse(self):
+                return FakeResponse()
+
+            def close(self):
+                pass
+
+        def record_frame(image_module, payload):
+            decoded.append(payload)
+            if len(decoded) == 3:
+                camera.stop_event.set()
+
+        with patch('claptrap_controller.camera.http.client.HTTPConnection',
+                   return_value=FakeConnection()), \
+                patch('claptrap_controller.camera.time.monotonic', return_value=100), \
+                patch.object(camera, '_decode_frame', side_effect=record_frame):
+            camera._read_stream(None)
+        self.assertEqual(len(decoded), 3)
 
 
 class TalkSenderTests(unittest.TestCase):

@@ -11,7 +11,6 @@ from .protocol import restore_camera_buffer
 MAX_FRAME = 2 * 1024 * 1024
 MAX_IMAGE_PIXELS = 4096 * 2160
 CAMERA_PORT = 8080
-FRAME_INTERVAL = 0.04
 RECONNECT_DELAY = 2
 
 
@@ -88,17 +87,16 @@ class Camera:
             if response.status != 200:
                 raise ValueError(f'Camera HTTP {response.status}')
             parser = FrameParser()
-            last_decode = 0
             while not self.stop_event.is_set():
                 chunk = response.read1(8192)
                 if not chunk:
                     raise ConnectionError('Camera stream ended')
                 frames = parser.feed(chunk)
-                if not frames or time.monotonic() - last_decode < FRAME_INTERVAL:
+                if not frames:
                     continue
                 try:
                     self._decode_frame(image_module, frames[-1])
-                    last_decode = self.frame_time = time.monotonic()
+                    self.frame_time = time.monotonic()
                     self.message = 'Camera live'
                 except (OSError, ValueError) as exc:
                     self.message = f'Camera decode: {exc}'

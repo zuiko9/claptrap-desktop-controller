@@ -19,6 +19,7 @@ CONFIG_PATH = CONFIG_DIR / 'claptrap-controller' / 'settings.json'
 DEFAULT_HOST = '192.168.10.123'
 DEFAULT_STRENGTH = 6
 UI_TICK_MS = 40
+VIDEO_POLL_MS = 5
 KEYS = {'w': 'up', 's': 'down', 'a': 'left', 'd': 'right',
         'Up': 'up', 'Down': 'down', 'Left': 'left', 'Right': 'right'}
 
@@ -76,6 +77,7 @@ class App:
         self.build_layout()
         self.bind_events()
         root.after(UI_TICK_MS, self.tick)
+        root.after(VIDEO_POLL_MS, self.refresh_video)
 
     def configure_window(self):
         root = self.root
@@ -424,20 +426,25 @@ class App:
                 self.telemetry.set(f'Battery {battery_text}    Wi-Fi {wifi}/6')
             if self.talk:
                 self.talk_status.set(self.talk.message)
-            camera_paused = bool(self.camera and self.camera.frame_time and
-                                 now - self.camera.frame_time > 2)
-            frame_stamp = self.camera.frame_time if self.camera else 0
-            camera_message = self.camera.message if self.camera else None
-            if (frame_stamp != self.frame_stamp or camera_paused != self.camera_paused or
-                    camera_message != self.camera_message):
-                self.frame_stamp = frame_stamp
-                self.camera_paused = camera_paused
-                self.render_video()
             if client.thread and not client.thread.is_alive():
                 reason = client.message
                 self.disconnect()
                 self.status.set(reason)
         self.root.after(UI_TICK_MS, self.tick)
+
+    def refresh_video(self):
+        camera = self.camera
+        if camera:
+            paused = bool(camera.frame_time and
+                          time.monotonic() - camera.frame_time > 2)
+            if (camera.frame_time != self.frame_stamp or
+                    paused != self.camera_paused or
+                    camera.message != self.camera_message):
+                self.frame_stamp = camera.frame_time
+                self.camera_paused = paused
+                self.render_video()
+        self.root.after(VIDEO_POLL_MS if camera else UI_TICK_MS,
+                        self.refresh_video)
 
     def close(self):
         try:

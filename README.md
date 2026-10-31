@@ -25,7 +25,7 @@ Set the robot's switch to **2 / On** for the camera or **1 / Run** to drive it. 
 - Press **F11** for fullscreen; **Esc** returns to windowed mode.
 - Hold **T** or the **Hold to talk** button to speak through the robot. Release to stop. Start with the talk level at 40%; lower it if you hear feedback. Your computer may ask for microphone access.
 
-The camera appears when you connect. If Pillow is missing or the stream fails, the video area shows a message. The battery reading is approximate and updates in 5% steps to keep it from jumping with every status message.
+The camera appears when you connect. The app follows the robot's camera stream and shows the newest frame it can display. If Pillow is missing or the stream fails, the video area shows a message. The battery reading is approximate and updates in 5% steps to keep it from jumping with every status message.
 
 Contributor setup and packaged build instructions are in [docs/development.md](docs/development.md).
 
