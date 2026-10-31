@@ -18,7 +18,7 @@ class Movement:
 
 
 class BatteryEstimate:
-    """Smooth the robot's noisy battery byte for an approximate display."""
+    """Keep brief changes in the battery reading from moving the display."""
 
     def __init__(self):
         self.samples = deque(maxlen=9)

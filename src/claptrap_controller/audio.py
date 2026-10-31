@@ -1,4 +1,4 @@
-"""Capture microphone PCM and send it to the robot while talk is held."""
+"""Send microphone audio to the robot while the user holds Talk."""
 
 import socket
 import struct
@@ -11,7 +11,7 @@ PACKET_BYTES = SAMPLES_PER_PACKET * 2
 
 
 def scale_pcm16le(data, percent):
-    """Attenuate signed samples without changing their polarity."""
+    """Lower the volume of signed 16-bit audio samples."""
     if len(data) % 2 or not 0 <= percent <= 100:
         raise ValueError('Invalid PCM data or microphone level')
     samples = struct.unpack(f'<{len(data) // 2}h', data)
