@@ -11,7 +11,7 @@ from .protocol import restore_camera_buffer
 MAX_FRAME = 2 * 1024 * 1024
 MAX_IMAGE_PIXELS = 4096 * 2160
 CAMERA_PORT = 8080
-FRAME_INTERVAL = 0.1
+FRAME_INTERVAL = 0.04
 RECONNECT_DELAY = 2
 
 
