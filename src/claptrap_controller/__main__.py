@@ -95,6 +95,8 @@ class App:
         style.configure('.', font=('TkDefaultFont', 11), background='#242d35', foreground='#f1f5f7')
         style.configure('TButton', padding=8)
         style.configure('TEntry', fieldbackground='#fff', foreground='#171d23')
+        style.configure('TSpinbox', fieldbackground='#fff', foreground='#171d23',
+                        selectbackground='#51616d', selectforeground='#fff')
 
     def build_layout(self):
         root = self.root
