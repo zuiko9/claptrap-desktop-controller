@@ -1,14 +1,20 @@
 """Small tests for safe input handling and split network messages."""
 
 from pathlib import Path
+import builtins
 import sys
+import threading
 import time
 import unittest
+from unittest.mock import patch
+import struct
+import types
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from claptrap_controller.camera import FrameParser
-from claptrap_controller.control import Movement, StatusParser
+from claptrap_controller.camera import Camera, FrameParser
+from claptrap_controller.audio import PACKET_BYTES, TalkSender, scale_pcm16le
+from claptrap_controller.control import BatteryEstimate, Movement, StatusParser
 from claptrap_controller.transport import ControlClient
 
 
@@ -21,6 +27,219 @@ class MovementTests(unittest.TestCase):
         self.assertEqual(movement.axes(6), (6, -6))
         movement.clear()
         self.assertEqual(movement.axes(6), (0, 0))
+
+
+class BatteryEstimateTests(unittest.TestCase):
+    def test_rejects_spikes_and_follows_sustained_change(self):
+        estimate = BatteryEstimate()
+        for raw in (50, 50, 90, 50, 50):
+            displayed = estimate.update(raw)
+        self.assertEqual(displayed, 50)
+        for _ in range(30):
+            displayed = estimate.update(80)
+        self.assertEqual(displayed, 80)
+        self.assertEqual(estimate.update(255), 80)
+
+    def test_repeated_invalid_readings_become_unknown(self):
+        estimate = BatteryEstimate()
+        self.assertEqual(estimate.update(55), 55)
+        self.assertEqual(estimate.update(255), 55)
+        self.assertEqual(estimate.update(255), 55)
+        self.assertIsNone(estimate.update(255))
+        self.assertEqual(estimate.update(70), 70)
+
+
+class CameraStreamTests(unittest.TestCase):
+    def test_decodes_each_arriving_frame_without_a_time_limit(self):
+        camera = Camera('192.168.10.123')
+        frames = [b'\xff\xd8' + bytes([number]) + b'\xff\xd9'
+                  for number in range(3)]
+        decoded = []
+
+        class FakeResponse:
+            status = 200
+
+            def read1(self, size):
+                return frames.pop(0) if frames else b''
+
+        class FakeConnection:
+            def request(self, method, path):
+                pass
+
+            def getresponse(self):
+                return FakeResponse()
+
+            def close(self):
+                pass
+
+        def record_frame(image_module, payload):
+            decoded.append(payload)
+            if len(decoded) == 3:
+                camera.stop_event.set()
+
+        with patch('claptrap_controller.camera.http.client.HTTPConnection',
+                   return_value=FakeConnection()), \
+                patch('claptrap_controller.camera.time.monotonic', return_value=100), \
+                patch.object(camera, '_decode_frame', side_effect=record_frame):
+            camera._read_stream(None)
+        self.assertEqual(len(decoded), 3)
+
+
+class TalkSenderTests(unittest.TestCase):
+    def test_reports_missing_portaudio_library(self):
+        sender = TalkSender('192.168.10.123', lambda: True, lambda: 40)
+        original_import = builtins.__import__
+
+        def import_without_portaudio(name, *args, **kwargs):
+            if name == 'sounddevice':
+                raise OSError('PortAudio not found')
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=import_without_portaudio):
+            sender._run()
+        self.assertIn('PortAudio not found', sender.message)
+
+    def test_restarts_after_release_during_microphone_read(self):
+        sender = TalkSender('192.168.10.123', lambda: True, lambda: 40)
+        first_read = threading.Event()
+        finish_first_read = threading.Event()
+        sent_again = threading.Event()
+        sent = []
+
+        class FakeSocket:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def bind(self, address):
+                pass
+
+            def sendto(self, data, address):
+                sent.append(data)
+                sender.stop()
+                sent_again.set()
+
+        class FakeStream:
+            count = 0
+
+            def __init__(self, **kwargs):
+                FakeStream.count += 1
+                self.first = FakeStream.count == 1
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def read(self, frames):
+                if self.first:
+                    first_read.set()
+                    finish_first_read.wait(1)
+                return bytes(PACKET_BYTES), False
+
+        fake_sd = types.SimpleNamespace(RawInputStream=FakeStream)
+        with patch.dict(sys.modules, {'sounddevice': fake_sd}), \
+                patch('claptrap_controller.audio.socket.socket', return_value=FakeSocket()):
+            sender.start()
+            self.assertTrue(first_read.wait(1))
+            sender.stop()
+            sender.start()
+            finish_first_read.set()
+            self.assertTrue(sent_again.wait(1))
+            sender.stop()
+            if sender.thread:
+                sender.thread.join(1)
+        self.assertEqual(len(sent), 1)
+
+    def test_signed_pcm_is_attenuated_without_clipping(self):
+        data = struct.pack('<3h', -32000, 0, 32000)
+        self.assertEqual(struct.unpack('<3h', scale_pcm16le(data, 40)),
+                         (-12800, 0, 12800))
+
+    def test_sends_1280_byte_pcm_from_local_port_8081(self):
+        sender = TalkSender('192.168.10.123', lambda: True, lambda: 40)
+        sent = []
+
+        class FakeSocket:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def bind(self, address):
+                sent.append(('bind', address))
+
+            def sendto(self, data, address):
+                sent.append(('send', data, address))
+                sender.stop()
+
+        class FakeStream:
+            def __init__(self, **kwargs):
+                self.options = kwargs
+
+            def __enter__(self):
+                sent.append(('stream', self.options))
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def read(self, frames):
+                self_test.assertEqual(frames, 640)
+                return struct.pack('<640h', *([-1000] * 640)), False
+
+        self_test = self
+        fake_sd = types.SimpleNamespace(RawInputStream=FakeStream)
+        with patch.dict(sys.modules, {'sounddevice': fake_sd}), \
+                patch('claptrap_controller.audio.socket.socket', return_value=FakeSocket()):
+            sender._run()
+        self.assertEqual(sent[0], ('bind', ('', 8081)))
+        self.assertEqual(sent[1][1], {'samplerate': 11025, 'blocksize': 640,
+                                      'channels': 1, 'dtype': 'int16'})
+        self.assertEqual(sent[2][2], ('192.168.10.123', 8081))
+        self.assertEqual(len(sent[2][1]), PACKET_BYTES)
+        self.assertEqual(struct.unpack_from('<h', sent[2][1]), (-400,))
+
+    def test_release_during_capture_does_not_send_audio(self):
+        sender = TalkSender('192.168.10.123', lambda: True, lambda: 40)
+        sent = []
+
+        class FakeSocket:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def bind(self, address):
+                pass
+
+            def sendto(self, data, address):
+                sent.append(data)
+
+        class FakeStream:
+            def __init__(self, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def read(self, frames):
+                sender.stop()
+                return bytes(PACKET_BYTES), False
+
+        fake_sd = types.SimpleNamespace(RawInputStream=FakeStream)
+        with patch.dict(sys.modules, {'sounddevice': fake_sd}), \
+                patch('claptrap_controller.audio.socket.socket', return_value=FakeSocket()):
+            sender._run()
+        self.assertEqual(sent, [])
 
 
 class StatusParserTests(unittest.TestCase):

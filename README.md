@@ -4,7 +4,7 @@ Claptrap Desktop Controller is an unofficial desktop app for the CL4P-TP robot i
 
 ## Run
 
-The app needs Python 3 and Tkinter. Camera display also needs Pillow. On Debian or Raspberry Pi OS, install `python3-tk`, `python3-pil`, and `python3-pil.imagetk`.
+Install Python 3 with Tkinter. To use the camera and microphone, install Pillow and `sounddevice` with `python -m pip install Pillow sounddevice`. On Debian or Raspberry Pi OS, also install `python3-tk`, `python3-pil`, `python3-pil.imagetk`, and `libportaudio2`.
 
 Packaged archives for Windows, macOS, and Linux are produced by the build workflow. Extract the archive for your system, then open the app inside. Linux also needs a graphical desktop and Tk libraries.
 
@@ -14,7 +14,7 @@ From the repository root:
 PYTHONPATH=src python -m claptrap_controller
 ```
 
-The window opens disconnected. Set the robot's switch to **2 / On** for camera access, or **1 / Run** to enable movement. Join its Wi-Fi (the `CL4P-TP...` network name varies between units), check the robot address, then select **Connect**. The default address is `192.168.10.123`; change it if your robot uses another address. Run mode may shut off if the robot is not upright on a solid surface.
+Set the robot's switch to **2 / On** for the camera or **1 / Run** to drive it. Join the robot's Wi-Fi; its network name usually starts with `CL4P-TP`. Open the app, check the address (usually `192.168.10.123`), and select **Connect**. If Run mode shuts off, place the robot upright on a solid surface.
 
 ## Controls
 
@@ -23,8 +23,9 @@ The window opens disconnected. Set the robot's switch to **2 / On** for camera a
 - Press **Space** to clear movement. Movement also clears when the window loses focus, status becomes stale, or you disconnect.
 - Set movement strength from 1 to 31. Start low when checking physical direction on a robot.
 - Press **F11** for fullscreen; **Esc** returns to windowed mode.
+- Hold **T** or the **Hold to talk** button to speak through the robot. Release to stop. Start with the talk level at 40%; lower it if you hear feedback. Your computer may ask for microphone access.
 
-The camera appears after connection when its stream is available. If Pillow is missing or the stream fails, the video area shows a message. Audio is not available in this build.
+The camera appears when you connect. The app follows the robot's camera stream and shows the newest frame it can display. If Pillow is missing or the stream fails, the video area shows a message. The battery reading is approximate and updates in 5% steps to keep it from jumping with every status message.
 
 Contributor setup and packaged build instructions are in [docs/development.md](docs/development.md).
 
