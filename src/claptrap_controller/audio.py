@@ -24,8 +24,10 @@ class TalkSender:
         self.host = host
         self.status_is_fresh = status_is_fresh
         self.level = level
+        self.lock = threading.Lock()
         self.stop_event = threading.Event()
         self.thread = None
+        self.restart_requested = False
         self.message = 'Talk idle'
 
     @property
@@ -33,21 +35,43 @@ class TalkSender:
         return self.thread is not None and self.thread.is_alive()
 
     def start(self):
-        if self.active:
-            return
+        with self.lock:
+            if self.thread is not None:
+                if self.stop_event.is_set():
+                    self.restart_requested = True
+                return
+            self._start_locked()
+
+    def _start_locked(self):
         self.stop_event = threading.Event()
         self.message = 'Starting microphone…'
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def stop(self):
-        self.stop_event.set()
+        with self.lock:
+            self.restart_requested = False
+            self.stop_event.set()
 
     def _run(self):
+        try:
+            self._capture()
+        finally:
+            with self.lock:
+                if self.thread is threading.current_thread():
+                    self.thread = None
+                    if self.restart_requested:
+                        self.restart_requested = False
+                        self._start_locked()
+
+    def _capture(self):
         try:
             import sounddevice as sd
         except ImportError:
             self.message = 'Talk needs sounddevice (python -m pip install sounddevice)'
+            return
+        except OSError as exc:
+            self.message = f'Microphone library unavailable: {exc}'
             return
         try:
             if self.stop_event.is_set() or not self.status_is_fresh():

@@ -23,10 +23,17 @@ class BatteryEstimate:
     def __init__(self):
         self.samples = deque(maxlen=9)
         self.filtered = None
+        self.invalid_count = 0
 
     def update(self, raw):
         if not 0 <= raw <= 100:
+            self.invalid_count += 1
+            if self.invalid_count >= 3:
+                self.samples.clear()
+                self.filtered = None
+                return None
             return None if self.filtered is None else self.display
+        self.invalid_count = 0
         self.samples.append(raw)
         middle = median(self.samples)
         if self.filtered is None:

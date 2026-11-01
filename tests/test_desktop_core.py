@@ -1,7 +1,9 @@
 """Small tests for safe input handling and split network messages."""
 
 from pathlib import Path
+import builtins
 import sys
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -37,6 +39,14 @@ class BatteryEstimateTests(unittest.TestCase):
             displayed = estimate.update(80)
         self.assertEqual(displayed, 80)
         self.assertEqual(estimate.update(255), 80)
+
+    def test_repeated_invalid_readings_become_unknown(self):
+        estimate = BatteryEstimate()
+        self.assertEqual(estimate.update(55), 55)
+        self.assertEqual(estimate.update(255), 55)
+        self.assertEqual(estimate.update(255), 55)
+        self.assertIsNone(estimate.update(255))
+        self.assertEqual(estimate.update(70), 70)
 
 
 class CameraStreamTests(unittest.TestCase):
@@ -76,6 +86,74 @@ class CameraStreamTests(unittest.TestCase):
 
 
 class TalkSenderTests(unittest.TestCase):
+    def test_reports_missing_portaudio_library(self):
+        sender = TalkSender('192.168.10.123', lambda: True, lambda: 40)
+        original_import = builtins.__import__
+
+        def import_without_portaudio(name, *args, **kwargs):
+            if name == 'sounddevice':
+                raise OSError('PortAudio not found')
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=import_without_portaudio):
+            sender._run()
+        self.assertIn('PortAudio not found', sender.message)
+
+    def test_restarts_after_release_during_microphone_read(self):
+        sender = TalkSender('192.168.10.123', lambda: True, lambda: 40)
+        first_read = threading.Event()
+        finish_first_read = threading.Event()
+        sent_again = threading.Event()
+        sent = []
+
+        class FakeSocket:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def bind(self, address):
+                pass
+
+            def sendto(self, data, address):
+                sent.append(data)
+                sender.stop()
+                sent_again.set()
+
+        class FakeStream:
+            count = 0
+
+            def __init__(self, **kwargs):
+                FakeStream.count += 1
+                self.first = FakeStream.count == 1
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def read(self, frames):
+                if self.first:
+                    first_read.set()
+                    finish_first_read.wait(1)
+                return bytes(PACKET_BYTES), False
+
+        fake_sd = types.SimpleNamespace(RawInputStream=FakeStream)
+        with patch.dict(sys.modules, {'sounddevice': fake_sd}), \
+                patch('claptrap_controller.audio.socket.socket', return_value=FakeSocket()):
+            sender.start()
+            self.assertTrue(first_read.wait(1))
+            sender.stop()
+            sender.start()
+            finish_first_read.set()
+            self.assertTrue(sent_again.wait(1))
+            sender.stop()
+            if sender.thread:
+                sender.thread.join(1)
+        self.assertEqual(len(sent), 1)
+
     def test_signed_pcm_is_attenuated_without_clipping(self):
         data = struct.pack('<3h', -32000, 0, 32000)
         self.assertEqual(struct.unpack('<3h', scale_pcm16le(data, 40)),
